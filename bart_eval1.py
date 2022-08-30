@@ -27,8 +27,8 @@ import rouge
 rouge_score = rouge.Rouge()
 import utils
 from dataset import create_dataset, create_sampler, create_loader
-from transformers import T5Tokenizer
-from transformers import T5ForConditionalGeneration
+from transformers import AutoTokenizer
+from transformers import AutoModelForSeq2SeqLM
 from scheduler import create_scheduler
 from optim import create_optimizer
 
@@ -73,7 +73,7 @@ def pre(token_list, tokenizer):
     res = []
     for i in token_list:
         temp = tokenizer.decode(i)
-        temp = temp[:temp.find("</s>")].replace("</s>", "").replace("<s>", "").replace("<pad>", "").strip()
+        temp = temp.replace("</s>", "").replace("<s>", "").replace("<pad>", "").strip()
         res.append(temp)
     return res
 @torch.no_grad()
@@ -90,9 +90,11 @@ def predict(model, data_loader, tokenizer, device, config,args):
                        'rouge-2': {'f': 0, 'p': 0, 'r': 0},
                         'rouge-l': {'f': 0, 'p': 0, 'r': 0}}
     # loss_all = 0
+    text_res = []
+    summary_res = []
     for text,summary in metric_logger.log_every(data_loader, print_freq, header):
         
-        text_inputs = tokenizer(text,padding='longest', return_tensors="pt").to(device) 
+        text_inputs = tokenizer(text,max_length=1024,truncation=True,padding=True,return_tensors="pt").to(device) 
         # summary_inputs = tokenizer(summary, padding='longest',return_tensors="pt").to(device) 
     #           "early_stopping": true,
     #   "length_penalty": 2.0,
@@ -100,15 +102,14 @@ def predict(model, data_loader, tokenizer, device, config,args):
     #   "min_length": 30,
     #   "no_repeat_ngram_size": 3,
     #   "num_beams": 4,
-    #   "prefix": "summarize: "
         if args.distributed:
             output = model.module.generate(text_inputs['input_ids'],
                                 max_length = 200,min_length=30,no_repeat_ngram_size=3, num_beams = 4,
                                 early_stopping = True,bos_token_id = 0).cpu()
         else:
-            output = model.module.generate(text_inputs['input_ids'],
-                                max_length = 256, num_beams = 2,
-                                early_stopping = True,bos_token_id = 0).cpu()            
+            output = model.generate(text_inputs['input_ids'],
+                                max_length = 200,min_length=30,no_repeat_ngram_size=3, num_beams = 4,
+                                early_stopping = True,bos_token_id = 0).cpu()        
         # output = utils.concat_all_gather(output,args.distributed).cpu()
         res_temp = pre(output,tokenizer)
         assert len(text)==len(res_temp)
@@ -116,8 +117,10 @@ def predict(model, data_loader, tokenizer, device, config,args):
         for source,target,predict in zip(text,summary,res_temp):
             temp = {}
             temp["source"] = source
-            temp["summary"] = summary
+            temp["summary"] = target
             temp["predict"] = predict
+            text_res.append(target)
+            summary_res.append(predict)
             scores = rouge_score.get_scores(predict,target)
             for metric in averaged_scores.keys():
                 for values in scores:
@@ -131,7 +134,12 @@ def predict(model, data_loader, tokenizer, device, config,args):
     averaged_scores['num'] = sample
     with open(os.path.join(args.output_dir,'{}.json'.format(utils.get_rank())),'w') as f:
         json.dump(averaged_scores,f,ensure_ascii=False)
-            
+    with open(os.path.join(args.output_dir,'{}.target'.format(utils.get_rank())),'w') as f:
+        for i in text_res:
+            f.writelines(i+'\n')
+    with open(os.path.join(args.output_dir,'{}.hypo'.format(utils.get_rank())),'w') as f:
+        for i in summary_res:
+            f.writelines(i+'\n')
     # gather the stats from all processes
     
     
@@ -159,15 +167,15 @@ def main(args, config):
         samplers = [None, None, None]
 
     train_loader, val_loader, test_loader = create_loader(datasets,samplers,
-                                                          batch_size=[config['batch_size_train']]+[16]*2,
+                                                          batch_size=[config['batch_size_train']]+[8]*2,
                                                           num_workers=[4,4,4],is_trains=[True,False,False], 
                                                           collate_fns=[None,None,None])
 
-    tokenizer = T5Tokenizer.from_pretrained(args.checkpoint)
+    tokenizer = AutoTokenizer.from_pretrained(args.checkpoint)
 
     #### Model #### 
     print("Creating model")
-    model = T5ForConditionalGeneration.from_pretrained(args.checkpoint)
+    model = AutoModelForSeq2SeqLM.from_pretrained(args.checkpoint)
 
     model = model.to(device)   
     
@@ -209,11 +217,11 @@ def main(args, config):
 
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
-    parser.add_argument('--config', default='./configs/T5summarization.yaml')
+    parser.add_argument('--config', default='./configs/Bart.yaml')
     parser.add_argument('--output_dir', default='output')  
-    parser.add_argument('--checkpoint', default='/data1/ach/project/T5summarization/model/t5-small')   
+    parser.add_argument('--checkpoint', default='/data1/ach/project/T5summarization/model/bart-large-cnn')   
     parser.add_argument('--evaluate', action='store_true')    
-    parser.add_argument('--device', default='cuda:6')
+    parser.add_argument('--device', default='cuda:0')
     parser.add_argument('--best_checkpoint',default='')
     # parser.add_argument('--prefix', default='cuda:6')
     parser.add_argument('--seed', default=42, type=int)

@@ -26,6 +26,8 @@ import utils
 from dataset import create_dataset, create_sampler, create_loader
 from transformers import T5Tokenizer
 from transformers import T5ForConditionalGeneration
+# from transformers import BartTokenizer
+# from transformers import BartForConditionalGeneration
 from scheduler import create_scheduler
 from optim import create_optimizer
 
@@ -47,9 +49,10 @@ def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device,
     
         # images, targets = images.to(device,non_blocking=True), targets.to(device,non_blocking=True)
         
-        text_inputs = tokenizer(text,padding='longest', return_tensors="pt").to(device) 
+        text_inputs = tokenizer(text,max_length=768, return_tensors="pt").to(device) 
         summary_inputs = tokenizer(summary, padding='longest',return_tensors="pt").to(device) 
-        loss = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,decoder_input_ids = summary_inputs.input_ids,decoder_attention_mask = summary_inputs.attention_mask,labels = summary_inputs.input_ids).loss    
+        loss = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,decoder_attention_mask = summary_inputs.attention_mask,labels = summary_inputs.input_ids).loss    
+        # loss = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,labels = summary_inputs.input_ids).loss    
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()    
@@ -59,7 +62,7 @@ def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device,
         metric_logger.update(lr=optimizer.param_groups[0]["lr"])
         metric_logger.update(loss=loss.cpu().item())
         
-        if epoch==0 and i%step_size==0 and i<=warmup_iterations: 
+        if epoch==0 and i%step_size==0 and i<=warmup_iterations and scheduler is not None: 
             scheduler.step(i//step_size)         
         
     # gather the stats from all processes
@@ -81,9 +84,11 @@ def evaluate(model, data_loader, tokenizer, device, config):
     # loss_all = 0
     for text,summary in metric_logger.log_every(data_loader, print_freq, header):
         
-        text_inputs = tokenizer(text,padding='longest', return_tensors="pt").to(device) 
+        text_inputs = tokenizer(text,max_length=768, return_tensors="pt").to(device) 
         summary_inputs = tokenizer(summary, padding='longest',return_tensors="pt").to(device) 
-        output = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,decoder_input_ids = summary_inputs.input_ids,decoder_attention_mask = summary_inputs.attention_mask,labels = summary_inputs.input_ids)    
+        output =  model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,decoder_attention_mask = summary_inputs.attention_mask,labels = summary_inputs.input_ids)
+        # output =  model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,labels = summary_inputs.input_ids)
+
         loss = output.loss
         sample+=1
         metric_logger.meters['loss'].update(loss.cpu().item(), n=len(text))
@@ -109,7 +114,7 @@ def main(args, config):
     #### Dataset #### 
     print("Creating dataset")
     datasets = create_dataset("summarization",config) 
-    # datasets[0].__getitem__(10)   
+    datasets[0].__getitem__(1)   
     if args.distributed:
         num_tasks = utils.get_world_size()
         global_rank = utils.get_rank()            
@@ -166,7 +171,16 @@ def main(args, config):
 
                 with open(os.path.join(args.output_dir, "log.txt"),"a") as f:
                     f.write(json.dumps(log_stats) + "\n")                
-            else:    
+            else:
+                save_obj = {
+                        'model': model_without_ddp.state_dict(),
+                        'optimizer': optimizer.state_dict(),
+                        # 'lr_scheduler': lr_scheduler.state_dict(),
+                        'config': config,
+                        'epoch': epoch,
+                    }
+                torch.save(save_obj, os.path.join(args.output_dir, 'checkpoint_{}.pth'.format(epoch)))     
+                print("best is {}".format(best))    
                 log_stats = {**{f'train_{k}': v for k, v in train_stats.items()},
                              **{f'val_{k}': v for k, v in val_stats.items()},
                             #  **{f'test_{k}': v for k, v in test_stats.items()},
@@ -180,7 +194,7 @@ def main(args, config):
                     save_obj = {
                         'model': model_without_ddp.state_dict(),
                         'optimizer': optimizer.state_dict(),
-                        'lr_scheduler': lr_scheduler.state_dict(),
+                        # 'lr_scheduler': lr_scheduler.state_dict(),
                         'config': config,
                         'epoch': epoch,
                     }
@@ -190,8 +204,10 @@ def main(args, config):
         
         if args.evaluate:
             break
-        lr_scheduler.step(epoch+warmup_steps+1)  
-        dist.barrier()   
+        if lr_scheduler is not None:
+            lr_scheduler.step(epoch+warmup_steps+1)  
+        if args.distributed:
+            dist.barrier()   
                 
     total_time = time.time() - start_time
     total_time_str = str(datetime.timedelta(seconds=int(total_time)))

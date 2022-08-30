@@ -1,0 +1,20 @@
+train_file: '/data1/ach/project/T5summarization/data/tagged/train.json'
+# train_file: '/data1/ach/project/T5summarization/data/res/test.json'
+val_file: '/data1/ach/project/T5summarization/data/tagged/val.json'                
+test_file: '/data1/ach/project/T5summarization/data/tagged/test.json'
+# train_file: '/data1/ach/project/T5summarization/data/tagged/test_ddp.json'
+# val_file: '/data1/ach/project/T5summarization/data/tagged/test_ddp.json'                
+# test_file: '/data1/ach/project/T5summarization/data/tagged/test_ddp.json'
+batch_size_train: 1
+batch_size_test: 16
+max_length: 1024
+temp: 0.07
+prefix: 'summarize: '
+alpha: 0.4
+warm_up: True
+use_prompt: False
+
+optimizer: {opt: adamW, lr: 1e-5, weight_decay: 0.02} 
+schedular: {sched: cosine, lr: 1e-5, epochs: 10, min_lr: 1e-6, decay_rate: 1, warmup_lr: 1e-5, warmup_epochs: 1, cooldown_epochs: 0}
+# schedular: {sched: nouse, lr: 1e-5, epochs: 10, min_lr: 1e-6, decay_rate: 1, warmup_lr: 1e-5, warmup_epochs: 1, cooldown_epochs: 0}
+
