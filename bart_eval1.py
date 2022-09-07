@@ -23,8 +23,10 @@ import torch.distributed as dist
 # from models.model_ve import ALBEF
 # from models.vit import interpolate_pos_embed
 # from models.tokenization_bert import BertTokenizer
-import rouge
-rouge_score = rouge.Rouge()
+from rouge_score import rouge_scorer
+scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeLsum'], use_stemmer=True)
+# from rouge import rouge
+# scorer = rouge.Rouge()
 import utils
 from dataset import create_dataset, create_sampler, create_loader
 from transformers import AutoTokenizer
@@ -32,43 +34,7 @@ from transformers import AutoModelForSeq2SeqLM
 from scheduler import create_scheduler
 from optim import create_optimizer
 
-
-def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device, scheduler, config):
-    # train
-    model.train()  
-    
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    metric_logger.add_meter('lr', utils.SmoothedValue(window_size=50, fmt='{value:.6f}'))
-    metric_logger.add_meter('loss', utils.SmoothedValue(window_size=50, fmt='{value:.4f}'))
-
-    header = 'Train Epoch: [{}]'.format(epoch)
-    print_freq = 50   
-    step_size = 100
-    warmup_iterations = warmup_steps*step_size  
  
-    for i,(text,summary) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
-    
-        # images, targets = images.to(device,non_blocking=True), targets.to(device,non_blocking=True)
-        
-        text_inputs = tokenizer(text,padding='longest', return_tensors="pt").to(device) 
-        summary_inputs = tokenizer(summary, padding='longest',return_tensors="pt").to(device) 
-        loss = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,decoder_input_ids = summary_inputs.input_ids,decoder_attention_mask = summary_inputs.attention_mask,labels = summary_inputs.input_ids).loss    
-        optimizer.zero_grad()
-        loss.backward()
-        optimizer.step()    
-        # del output
-        # del text_inputs
-        # del summary_inputs
-        metric_logger.update(lr=optimizer.param_groups[0]["lr"])
-        metric_logger.update(loss=loss.cpu().item())
-        
-        if epoch==0 and i%step_size==0 and i<=warmup_iterations: 
-            scheduler.step(i//step_size)         
-        
-    # gather the stats from all processes
-    metric_logger.synchronize_between_processes()
-    print("Averaged stats:", metric_logger.global_avg())     
-    return {k: "{:.4f}".format(meter.global_avg) for k, meter in metric_logger.meters.items()}    
 def pre(token_list, tokenizer):
     res = []
     for i in token_list:
@@ -86,15 +52,17 @@ def predict(model, data_loader, tokenizer, device, config,args):
     header = 'Evaluation:'
     print_freq = 50
     sample = 0
-    averaged_scores = {'rouge-1': {'f': 0, 'p': 0, 'r': 0},
-                       'rouge-2': {'f': 0, 'p': 0, 'r': 0},
-                        'rouge-l': {'f': 0, 'p': 0, 'r': 0}}
+    averaged_scores = {'rouge1': {'p': 0, 'r': 0,'f': 0},
+                       'rouge2': { 'p': 0, 'r': 0, 'f': 0},
+                        'rougeLsum': {'p': 0, 'r': 0, 'f': 0}}
     # loss_all = 0
     text_res = []
     summary_res = []
+    target_res = []
     for text,summary in metric_logger.log_every(data_loader, print_freq, header):
         
         text_inputs = tokenizer(text,max_length=1024,truncation=True,padding=True,return_tensors="pt").to(device) 
+        # text_inputs = tokenizer(text,padding='longest', return_tensors="pt").to(device)
         # summary_inputs = tokenizer(summary, padding='longest',return_tensors="pt").to(device) 
     #           "early_stopping": true,
     #   "length_penalty": 2.0,
@@ -113,19 +81,24 @@ def predict(model, data_loader, tokenizer, device, config,args):
         # output = utils.concat_all_gather(output,args.distributed).cpu()
         res_temp = pre(output,tokenizer)
         assert len(text)==len(res_temp)
+        assert len(target_res)==len(summary_res)
         sample += len(text)
+        target_res.extend(summary)
+        summary_res.extend(res_temp)
         for source,target,predict in zip(text,summary,res_temp):
             temp = {}
             temp["source"] = source
             temp["summary"] = target
             temp["predict"] = predict
-            text_res.append(target)
-            summary_res.append(predict)
-            scores = rouge_score.get_scores(predict,target)
+            # text_res.append(target)
+            # target_res.append(target)
+            # summary_res.append(predict)
+            scores = scorer.score(target,predict)
+            # scores = scorer.get_scores(target,predict)
             for metric in averaged_scores.keys():
-                for values in scores:
-                    for sub_metric in averaged_scores[metric]:
-                        averaged_scores[metric][sub_metric] += values[metric][sub_metric]
+                # for values in scores:
+                    for sub_metric in range(len(averaged_scores[metric].keys())):
+                        averaged_scores[metric][list(averaged_scores[metric].keys())[sub_metric]] += scores[metric][sub_metric]
     for key in averaged_scores.keys():
         for sub_key in averaged_scores[key].keys():
             averaged_scores[key][sub_key] /= sample
@@ -134,11 +107,14 @@ def predict(model, data_loader, tokenizer, device, config,args):
     averaged_scores['num'] = sample
     with open(os.path.join(args.output_dir,'{}.json'.format(utils.get_rank())),'w') as f:
         json.dump(averaged_scores,f,ensure_ascii=False)
-    with open(os.path.join(args.output_dir,'{}.target'.format(utils.get_rank())),'w') as f:
-        for i in text_res:
-            f.writelines(i+'\n')
+    # with open(os.path.join(args.output_dir,'{}.target'.format(utils.get_rank())),'w') as f:
+    #     for i in text_res:
+    #         f.writelines(i+'\n')
     with open(os.path.join(args.output_dir,'{}.hypo'.format(utils.get_rank())),'w') as f:
         for i in summary_res:
+            f.writelines(i+'\n')
+    with open(os.path.join(args.output_dir,'{}.target'.format(utils.get_rank())),'w') as f:
+        for i in target_res:
             f.writelines(i+'\n')
     # gather the stats from all processes
     
@@ -167,7 +143,7 @@ def main(args, config):
         samplers = [None, None, None]
 
     train_loader, val_loader, test_loader = create_loader(datasets,samplers,
-                                                          batch_size=[config['batch_size_train']]+[8]*2,
+                                                          batch_size=[config['batch_size_train']]+[16]*2,
                                                           num_workers=[4,4,4],is_trains=[True,False,False], 
                                                           collate_fns=[None,None,None])
 
@@ -178,7 +154,12 @@ def main(args, config):
     model = AutoModelForSeq2SeqLM.from_pretrained(args.checkpoint)
 
     model = model.to(device)   
-    
+    if args.best_checkpoint:    
+        checkpoint = torch.load(args.best_checkpoint, map_location='cpu') 
+        state_dict = checkpoint['model']
+        msg = model.load_state_dict(state_dict,strict=True)
+        print('load checkpoint from %s'%args.best_checkpoint)
+        print(msg)    
     model_without_ddp = model
     if args.distributed:
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
@@ -188,7 +169,7 @@ def main(args, config):
     optimizer = create_optimizer(arg_opt, model)
     arg_sche = utils.AttrDict(config['schedular'])
     lr_scheduler, _ = create_scheduler(arg_sche, optimizer)  
-    
+
     # max_epoch = config['schedular']['epochs']
     # warmup_steps = config['schedular']['warmup_epochs']
     # best = 100000
@@ -221,8 +202,9 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', default='output')  
     parser.add_argument('--checkpoint', default='/data1/ach/project/T5summarization/model/bart-large-cnn')   
     parser.add_argument('--evaluate', action='store_true')    
-    parser.add_argument('--device', default='cuda:0')
-    parser.add_argument('--best_checkpoint',default='')
+    parser.add_argument('--device', default='cuda:1')
+    # parser.add_argument('--best_checkpoint',default='')
+    parser.add_argument('--best_checkpoint',default='/data1/ach/project/T5summarization/output/bart/bart_large_cnn/3e-5-prompt-1024-grad/checkpoint_0.pth')
     # parser.add_argument('--prefix', default='cuda:6')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')    
@@ -230,7 +212,7 @@ if __name__ == '__main__':
     # parser.add_argument('--distributed', default=True, type=bool)
     parser.add_argument('--distributed', default=True, type=bool)
     args = parser.parse_args()
-
+    print(args)
     config = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)
 
     Path(args.output_dir).mkdir(parents=True, exist_ok=True)
