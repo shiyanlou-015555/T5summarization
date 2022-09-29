@@ -257,7 +257,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', default='output/bart/prompt')  
     parser.add_argument('--checkpoint', default='/data1/ach/project/T5summarization/model/bart-large-cnn')   
     parser.add_argument('--evaluate', action='store_true')    
-    parser.add_argument('--device', default='cuda:6')
+    parser.add_argument('--device', default='cuda:0')
     # parser.add_argument('--prefix', default='cuda:6')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')    

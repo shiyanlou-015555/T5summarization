@@ -30,8 +30,8 @@ from transformers import T5ForConditionalGeneration
 # from transformers import BartForConditionalGeneration
 from scheduler import create_scheduler
 from optim import create_optimizer
-
-
+from apex import amp
+from apex.parallel import DistributedDataParallel as apexDDP
 def train(model, data_loader, optimizer, tokenizer, epoch, warmup_steps, device, scheduler, config):
     # train
     model.train()  

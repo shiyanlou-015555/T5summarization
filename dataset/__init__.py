@@ -5,13 +5,13 @@ from datasets import load_dataset
 
 
 # from dataset.randaugment import RandomAugment
-from dataset.summarization import summarization_dataset
+from dataset.summarization import summarization_dataset,summarization_test_dataset
 def create_dataset(dataset, config):
     if dataset=="summarization":
         # dataset = load_dataset("/data1/ach/project/T5summarization/dataset/cnn_dailymail",version="3.0.0")
         train_dataset = summarization_dataset(config["train_file"],config["max_length"],config["prefix"],config["use_prompt"])
         val_dataset = summarization_dataset(config["val_file"],config["max_length"],config["prefix"],config["use_prompt"])
-        test_dataset = summarization_dataset(config["test_file"],config["max_length"],config["prefix"],config["use_prompt"])
+        test_dataset = summarization_test_dataset(config["test_file"],config["max_length"],config["prefix"],config["use_prompt"])
         return train_dataset,val_dataset,test_dataset
 
 def vqa_collate_fn(batch):

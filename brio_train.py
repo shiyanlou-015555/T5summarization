@@ -40,7 +40,7 @@ from rouge_score import rouge_scorer
 scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeLsum'], use_stemmer=True)
 from apex.parallel import DistributedDataParallel as apexDDP
 from label_smoothing_loss import label_smoothing_loss
-def train(model, data_loader, optimizer, tokenizer, max_epoch, device, mle_fn, config,args,val_loader):
+def train(model, data_loader, optimizer, tokenizer, max_epoch, device, mle_fn, config, args, val_loader):
     # model, train_loader, optimizer, tokenizer, epoch, device, mle_fn, config,args
     # train
     model.train() 
@@ -49,6 +49,7 @@ def train(model, data_loader, optimizer, tokenizer, max_epoch, device, mle_fn, c
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=50, fmt='{value:.6f}'))
     metric_logger.add_meter('loss', utils.SmoothedValue(window_size=50, fmt='{value:.4f}'))
+    print("dataset config is {}".format(config[args.dataset]))
     for epoch in range(max_epoch):
         header = 'Train Epoch: [{}]'.format(epoch)
         print_freq = 50   
@@ -57,7 +58,7 @@ def train(model, data_loader, optimizer, tokenizer, max_epoch, device, mle_fn, c
         for i,(text,summary) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
             step_cnt += 1         
             text_inputs = tokenizer.batch_encode_plus(text,max_length=1024,pad_to_max_length=False,truncation=True,return_tensors="pt").to(device) 
-            summary_inputs = tokenizer.batch_encode_plus(summary,max_length=512,pad_to_max_length=False,truncation=True,padding=True,return_tensors="pt").to(device) 
+            summary_inputs = tokenizer.batch_encode_plus(summary,max_length=config[args.dataset]['max_target_len'],pad_to_max_length=False,truncation=True,padding=True,return_tensors="pt").to(device) 
             output = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,decoder_attention_mask = summary_inputs.attention_mask,labels = summary_inputs.input_ids)   
             # loss = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,labels = summary_inputs.input_ids).loss    
             loss = mle_fn(output.logits.transpose(1,2),summary_inputs.input_ids)
@@ -77,7 +78,7 @@ def train(model, data_loader, optimizer, tokenizer, max_epoch, device, mle_fn, c
                 optimizer.step()
                 optimizer.zero_grad()
             if all_step_cnt % 1000 == 0:
-                val_stats = evaluate(model, val_loader, tokenizer, device, config)
+                val_stats = evaluate(model, val_loader, tokenizer, device, config, args)
                 if utils.is_main_process():
                     print("best is {}".format(best))    
                     log_stats = {**{f'val_{k}': v for k, v in val_stats.items()},
@@ -116,7 +117,7 @@ def train(model, data_loader, optimizer, tokenizer, max_epoch, device, mle_fn, c
     # return {k: "{:.4f}".format(meter.global_avg) for k, meter in metric_logger.meters.items()}    
 
 @torch.no_grad()
-def evaluate(model, data_loader, tokenizer, device, config):
+def evaluate(model, data_loader, tokenizer, device, config, args):
     # test
     model.eval()
             
@@ -129,7 +130,7 @@ def evaluate(model, data_loader, tokenizer, device, config):
     for text,summary in metric_logger.log_every(data_loader, print_freq, header):
         
         text_inputs = tokenizer(text,max_length=1024,padding=True,truncation=True,return_tensors="pt").to(device) 
-        summary_inputs = tokenizer(summary, max_length=512,padding=True,truncation=True,return_tensors="pt").to(device) 
+        summary_inputs = tokenizer(summary, max_length=config[args.dataset]['max_target_len'], padding=True,truncation=True,return_tensors="pt").to(device) 
         output =  model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,decoder_attention_mask = summary_inputs.attention_mask,labels = summary_inputs.input_ids)
         loss = output.loss
         sample+=1
@@ -139,59 +140,59 @@ def evaluate(model, data_loader, tokenizer, device, config):
     metric_logger.synchronize_between_processes()
     print("Averaged stats loss:", metric_logger.global_avg())   
     return {k: "{:.4f}".format(meter.global_avg) for k, meter in metric_logger.meters.items()}
-def pre(token_list, tokenizer):
-    res = []
-    for i in token_list:
-        temp = tokenizer.decode(i)
-        temp = temp.replace("</s>", "").replace("<s>", "").replace("<pad>", "").strip()
-        res.append(temp)
-    return res
-@torch.no_grad()
-def predict(model, data_loader, tokenizer, device, config,args):
-    # test
-    model.eval()
+# def pre(token_list, tokenizer):
+#     res = []
+#     for i in token_list:
+#         temp = tokenizer.decode(i)
+#         temp = temp.replace("</s>", "").replace("<s>", "").replace("<pad>", "").strip()
+#         res.append(temp)
+#     return res
+# @torch.no_grad()
+# def predict(model, data_loader, tokenizer, device, config,args):
+#     # test
+#     model.eval()
             
-    metric_logger = utils.MetricLogger(delimiter="  ")
-    res = []
-    header = 'Evaluation:'
-    print_freq = 50
-    sample = 0
-    averaged_scores = {'rouge-1': {'f': 0, 'p': 0, 'r': 0},
-                       'rouge-2': {'f': 0, 'p': 0, 'r': 0},
-                        'rouge-l': {'f': 0, 'p': 0, 'r': 0}}
-    # loss_all = 0
-    text_res = []
-    summary_res = []
-    for text,summary in metric_logger.log_every(data_loader, print_freq, header):
+#     metric_logger = utils.MetricLogger(delimiter="  ")
+#     res = []
+#     header = 'Evaluation:'
+#     print_freq = 50
+#     sample = 0
+#     averaged_scores = {'rouge-1': {'f': 0, 'p': 0, 'r': 0},
+#                        'rouge-2': {'f': 0, 'p': 0, 'r': 0},
+#                         'rouge-l': {'f': 0, 'p': 0, 'r': 0}}
+#     # loss_all = 0
+#     text_res = []
+#     summary_res = []
+#     for text,summary in metric_logger.log_every(data_loader, print_freq, header):
         
-        text_inputs = tokenizer(text,max_length=1024,truncation=True,padding=True,return_tensors="pt").to(device) 
-        if args.distributed:
-            output = model.module.generate(text_inputs['input_ids'],
-                                max_length = 200,min_length=30,no_repeat_ngram_size=3, num_beams = 4,
-                                early_stopping = True,bos_token_id = 0).cpu()
-        else:
-            output = model.generate(text_inputs['input_ids'],
-                                max_length = 200,min_length=30,no_repeat_ngram_size=3, num_beams = 4,
-                                early_stopping = True,bos_token_id = 0).cpu()        
-        # output = utils.concat_all_gather(output,args.distributed).cpu()
-        res_temp = pre(output,tokenizer)
-        assert len(text)==len(res_temp)
-        sample += len(text)
-        for source,target,predict in zip(text,summary,res_temp):
-            temp = {}
-            temp["source"] = source
-            temp["summary"] = target
-            temp["predict"] = predict
-            text_res.append(target)
-            summary_res.append(predict)
-            scores = scorer.score(target,predict)
-            for metric in averaged_scores.keys():
-                for values in scores:
-                    for sub_metric in averaged_scores[metric]:
-                        averaged_scores[metric][sub_metric] += values[metric][sub_metric]
-    for key in averaged_scores.keys():
-        for sub_key in averaged_scores[key].keys():
-            averaged_scores[key][sub_key] /= sample
+#         text_inputs = tokenizer(text,max_length=1024,truncation=True,padding=True,return_tensors="pt").to(device) 
+#         if args.distributed:
+#             output = model.module.generate(text_inputs['input_ids'],
+#                                 max_length = 200,min_length=30,no_repeat_ngram_size=3, num_beams = 4,
+#                                 early_stopping = True,bos_token_id = 0).cpu()
+#         else:
+#             output = model.generate(text_inputs['input_ids'],
+#                                 max_length = 200,min_length=30,no_repeat_ngram_size=3, num_beams = 4,
+#                                 early_stopping = True,bos_token_id = 0).cpu()        
+#         # output = utils.concat_all_gather(output,args.distributed).cpu()
+#         res_temp = pre(output,tokenizer)
+#         assert len(text)==len(res_temp)
+#         sample += len(text)
+#         for source,target,predict in zip(text,summary,res_temp):
+#             temp = {}
+#             temp["source"] = source
+#             temp["summary"] = target
+#             temp["predict"] = predict
+#             text_res.append(target)
+#             summary_res.append(predict)
+#             scores = scorer.score(target,predict)
+#             for metric in averaged_scores.keys():
+#                 for values in scores:
+#                     for sub_metric in averaged_scores[metric]:
+#                         averaged_scores[metric][sub_metric] += values[metric][sub_metric]
+#     for key in averaged_scores.keys():
+#         for sub_key in averaged_scores[key].keys():
+#             averaged_scores[key][sub_key] /= sample
     
 def main(args, config):
     utils.init_distributed_mode(args)    
@@ -314,7 +315,7 @@ if __name__ == '__main__':
     parser.add_argument('--output_dir', default='output/bart/prompt')  
     parser.add_argument('--checkpoint', default='/data1/ach/project/T5summarization/model/bart-large-cnn')   
     parser.add_argument('--evaluate', action='store_true')    
-    parser.add_argument('--device', default='cuda:1')
+    parser.add_argument('--device', default='cuda:7')
     # parser.add_argument('--prefix', default='cuda:6')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')    
@@ -322,6 +323,7 @@ if __name__ == '__main__':
     # parser.add_argument('--distributed', default=True, type=bool)
     parser.add_argument('--distributed', default=False, type=bool)
     parser.add_argument('--fp16', default=False, type=bool)
+    parser.add_argument('--dataset', default="XSUM", type=str)
     args = parser.parse_args()
 
     config = yaml.load(open(args.config, 'r'), Loader=yaml.Loader)

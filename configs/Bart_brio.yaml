@@ -1,0 +1,74 @@
+# train_file: '/data1/ach/project/T5summarization/data/cnn_cln_tagged/train.json'
+# val_file: '/data1/ach/project/T5summarization/data/cnn_cln_tagged/val.json'
+# test_file: '/data1/ach/project/T5summarization/data/cnn_cln_tagged/test_ddp.json'  
+# train_file: '/data1/ach/project/T5summarization/data/cnn_cln_high/train.json'
+# val_file: '/data1/ach/project/T5summarization/data/cnn_cln_high/val.json'
+# test_file: '/data1/ach/project/T5summarization/data/cnn_cln_high/test.json'  
+# train_file: '/data1/ach/project/T5summarization/data/cnn_cln_low/train.json'
+# val_file: '/data1/ach/project/T5summarization/data/cnn_cln_low/val.json'
+# test_file: '/data1/ach/project/T5summarization/data/cnn_cln_low/test.json'  
+train_file: '/data1/ach/project/T5summarization/data/xsum_tag/xsum/train.json'
+val_file: '/data1/ach/project/T5summarization/data/xsum_tag/xsum/val.json'
+test_file: '/data1/ach/project/T5summarization/data/xsum_tag/xsum/test.json'  
+
+
+# train_file: '/data1/ach/project/T5summarization/data/res/test.json'             
+# test_file: '/data1/ach/project/T5summarization/data/cnn_cln_tagged/test.json'
+# train_file: '/data1/ach/project/T5summarization/data/tagged/test_ddp.json'
+# val_file: '/data1/ach/project/T5summarization/data/tagged/test_ddp.json'                
+# test_file: '/data1/ach/project/T5summarization/data/tagged/test.json'
+batch_size_train: 1
+batch_size_test: 1
+max_length: 1024
+prefix: ''
+# alpha: 0.4
+warm_up: True
+accumulation_step: 8
+smooth: 0.1
+epochs: 10
+max_lr: 2e-3
+warmup_steps: 5000
+eval_interval: 1000
+use_prompt: False
+
+
+
+tuning_mode: "prefixtune" 
+preseqlen: 200 
+# label_smoothing 0.0 
+use_deep: no 
+XSUM:
+  max_target_len: 128
+  beam: 6
+  min_length: 11
+  max_length: 60
+
+CNN_DM:
+  max_target_len: 512
+  beam: 4
+  min_length: 56
+  max_length: 142
+# gpus 1 
+# learning_rate 5e-05 
+# train_batch_size 16 
+# eval_batch_size 16 
+# num_train_epochs 30 
+# optim_prefix yes 
+# preseqlen 200 
+# prefix_mode activation 
+# format_mode cat 
+# gradient_accumulation_steps 3 
+# learning_rate 5e-05 
+# weight_decay 0.0 
+# seed 101 
+# mid_dim 800 
+# use_dropout no 
+# prefix_dropout 0.0 
+# max_source_length 1024 
+# max_target_length 60 
+# val_max_target_length 60 
+# test_max_target_length 100  
+# optimizer: {opt: adamW, lr: 3e-5, weight_decay: 0.02} 
+# # schedular: {sched: cosine, lr: 1e-5, epochs: 10, min_lr: 1e-6, decay_rate: 1, warmup_lr: 1e-5, warmup_epochs: 1, cooldown_epochs: 0}
+# schedular: {sched: cosine, lr: 3e-5, epochs: 10, min_lr: 1e-6, decay_rate: 1, warmup_lr: 1e-5, warmup_epochs: 1, cooldown_epochs: 0}
+

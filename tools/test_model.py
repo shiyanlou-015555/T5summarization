@@ -1,5 +1,5 @@
 from transformers import AutoTokenizer
-tokenizer = AutoTokenizer.from_pretrained("/data1/ach/project/T5summarization/model/t5-small")
+tokenizer = AutoTokenizer.from_pretrained("/data1/ach/project/T5summarization/model/bart-large-cnn")
 # text = ["I","t5tokenizer"]
 text = ["summarize: by. emily crane."]
 tokenized_input = tokenizer(text)

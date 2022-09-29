@@ -1,0 +1,61 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "Python: Current File",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "5"
+            }
+        },
+        {
+            "name": "t5",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "1"
+            },
+            "args": [
+                "--config",
+                "./configs/T5summarization.yaml",
+                "--output_dir",
+                "output/3.0.0_small_eval",
+                "--checkpoint",
+                "/data1/ach/project/T5summarization/model/t5-base",
+                "--device",
+                "cuda"
+            ]
+        },
+        {
+            "name": "bart",
+            "type": "python",
+            "request": "launch",
+            "program": "${file}",
+            "console": "integratedTerminal",
+            "justMyCode": false,
+            "env": {
+                "CUDA_VISIBLE_DEVICES": "7"
+            },
+            "args": [
+                "--config",
+                "./configs/Bart_use_prompt.yaml",
+                "--output_dir",
+                "output/bart/1e-5-prompt-2048",
+                "--checkpoint",
+                "/data1/ach/project/T5summarization/model/bart-large",
+                "--device",
+                "cuda"
+            ]
+        }
+    ]
+}

@@ -1,10 +1,11 @@
-export CUDA_VISIBLE_DEVICES=4,5,6,7
-export MASTER_PORT=29519
-python -m torch.distributed.launch --nproc_per_node=4 --master_port=${MASTER_PORT} --use_env brio_bart.py \
+export CUDA_VISIBLE_DEVICES=5,6,7
+export MASTER_PORT=29521
+python -m torch.distributed.launch --nproc_per_node=3 --master_port=${MASTER_PORT} --use_env brio_train.py \
     --config ./configs/Bart_brio.yaml \
-    --output_dir output/bart/bart_large_cnn/3e-5-prompt-1024-grad-brio \
-    --checkpoint /data1/ach/project/T5summarization/model/bart-large-cnn \
+    --output_dir output/bart/bart_large_cnn/xsum/3e-5-prompt-1024-grad-brio \
+    --checkpoint /data1/ach/project/T5summarization/model/bart-large-cnn\
     --distributed true \
+    --dataset XSUM \
     --device cuda
 # export CUDA_VISIBLE_DEVICES=4,5,6,7
 # export MASTER_PORT=29519

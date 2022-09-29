@@ -59,7 +59,8 @@ def predict(model, data_loader, tokenizer, device, config,args):
     text_res = []
     summary_res = []
     target_res = []
-    for text,summary in metric_logger.log_every(data_loader, print_freq, header):
+    idx_res = []
+    for text,summary,idx in metric_logger.log_every(data_loader, print_freq, header):
         
         text_inputs = tokenizer(text,max_length=1024,truncation=True,padding=True,return_tensors="pt").to(device) 
         # text_inputs = tokenizer(text,padding='longest', return_tensors="pt").to(device)
@@ -85,6 +86,8 @@ def predict(model, data_loader, tokenizer, device, config,args):
         sample += len(text)
         target_res.extend(summary)
         summary_res.extend(res_temp)
+        idx_res.extend([i.item() for i in idx])
+        text_res.extend(text)
         for source,target,predict in zip(text,summary,res_temp):
             temp = {}
             temp["source"] = source
@@ -107,14 +110,17 @@ def predict(model, data_loader, tokenizer, device, config,args):
     averaged_scores['num'] = sample
     with open(os.path.join(args.output_dir,'{}.json'.format(utils.get_rank())),'w') as f:
         json.dump(averaged_scores,f,ensure_ascii=False)
-    # with open(os.path.join(args.output_dir,'{}.target'.format(utils.get_rank())),'w') as f:
-    #     for i in text_res:
-    #         f.writelines(i+'\n')
     with open(os.path.join(args.output_dir,'{}.hypo'.format(utils.get_rank())),'w') as f:
         for i in summary_res:
             f.writelines(i+'\n')
     with open(os.path.join(args.output_dir,'{}.target'.format(utils.get_rank())),'w') as f:
         for i in target_res:
+            f.writelines(i+'\n')
+    with open(os.path.join(args.output_dir,'{}.idx'.format(utils.get_rank())),'w') as f:
+        for i in idx_res:
+            f.writelines(str(i)+'\n')
+    with open(os.path.join(args.output_dir,'{}.text'.format(utils.get_rank())),'w') as f:
+        for i in text_res:
             f.writelines(i+'\n')
     # gather the stats from all processes
     
@@ -134,7 +140,7 @@ def main(args, config):
     #### Dataset #### 
     print("Creating dataset")
     datasets = create_dataset("summarization",config) 
-    # datasets[0].__getitem__(10)   
+    datasets[2].__getitem__(0)   
     if args.distributed:
         num_tasks = utils.get_world_size()
         global_rank = utils.get_rank()            
@@ -144,7 +150,7 @@ def main(args, config):
 
     train_loader, val_loader, test_loader = create_loader(datasets,samplers,
                                                           batch_size=[config['batch_size_train']]+[16]*2,
-                                                          num_workers=[4,4,4],is_trains=[True,False,False], 
+                                                          num_workers=[0,0,0],is_trains=[True,False,False], 
                                                           collate_fns=[None,None,None])
 
     tokenizer = AutoTokenizer.from_pretrained(args.checkpoint)
@@ -157,6 +163,11 @@ def main(args, config):
     if args.best_checkpoint:    
         checkpoint = torch.load(args.best_checkpoint, map_location='cpu') 
         state_dict = checkpoint['model']
+        for key in list(state_dict.keys()):        
+            if key.startswith("module"):
+                new_key = key.replace('module.','')
+                state_dict[new_key] = state_dict[key] 
+                del state_dict[key]
         msg = model.load_state_dict(state_dict,strict=True)
         print('load checkpoint from %s'%args.best_checkpoint)
         print(msg)    
@@ -165,10 +176,10 @@ def main(args, config):
         model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
         model_without_ddp = model.module    
     
-    arg_opt = utils.AttrDict(config['optimizer'])
-    optimizer = create_optimizer(arg_opt, model)
-    arg_sche = utils.AttrDict(config['schedular'])
-    lr_scheduler, _ = create_scheduler(arg_sche, optimizer)  
+    # arg_opt = utils.AttrDict(config['optimizer'])
+    # optimizer = create_optimizer(arg_opt, model)
+    # arg_sche = utils.AttrDict(config['schedular'])
+    # lr_scheduler, _ = create_scheduler(arg_sche, optimizer)  
 
     # max_epoch = config['schedular']['epochs']
     # warmup_steps = config['schedular']['warmup_epochs']
@@ -204,7 +215,7 @@ if __name__ == '__main__':
     parser.add_argument('--evaluate', action='store_true')    
     parser.add_argument('--device', default='cuda:1')
     # parser.add_argument('--best_checkpoint',default='')
-    parser.add_argument('--best_checkpoint',default='/data1/ach/project/T5summarization/output/bart/bart_large_cnn/3e-5-prompt-1024-grad/checkpoint_0.pth')
+    parser.add_argument('--best_checkpoint',default='/data1/ach/project/T5summarization/output/bart/bart_large_cnn/3e-5-prompt-1024-grad-brio/checkpoint_1000.pth')
     # parser.add_argument('--prefix', default='cuda:6')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')    

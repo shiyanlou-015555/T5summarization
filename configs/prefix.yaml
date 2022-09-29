@@ -1,0 +1,21 @@
+train_file: '/data1/ach/project/T5summarization/data/cnn_cln_tagged/test_ddp.json'
+val_file: '/data1/ach/project/T5summarization/data/cnn_cln_tagged/test_ddp.json'
+test_file: '/data1/ach/project/T5summarization/data/cnn_cln_tagged/test_ddp.json'  
+batch_size_train: 1
+batch_size_test: 1
+max_length: 1024
+prefix: ''
+# alpha: 0.4
+warm_up: True
+accumulation_step: 8
+smooth: 0.1
+epochs: 10
+max_lr: 2e-3
+warmup_steps: 10000
+eval_interval: 1000
+use_prompt: False
+checkpoint: "/data1/ach/project/T5summarization/model/bart-large-cnn"
+# optimizer: {opt: adamW, lr: 3e-5, weight_decay: 0.02} 
+# # schedular: {sched: cosine, lr: 1e-5, epochs: 10, min_lr: 1e-6, decay_rate: 1, warmup_lr: 1e-5, warmup_epochs: 1, cooldown_epochs: 0}
+# schedular: {sched: cosine, lr: 3e-5, epochs: 10, min_lr: 1e-6, decay_rate: 1, warmup_lr: 1e-5, warmup_epochs: 1, cooldown_epochs: 0}
+

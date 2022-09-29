@@ -1,6 +1,6 @@
 from datasets import load_dataset
 import json
-dataset = load_dataset("/data1/ach/project/T5summarization/dataset/cnn_dailymail",version="3.0.0")
+dataset = load_dataset("/data1/ach/project/T5summarization/data_xsum")
 train = []
 for i in dataset['train']:
     temp = {}
