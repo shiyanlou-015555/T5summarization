@@ -35,22 +35,58 @@ from transformers import BartForConditionalGeneration
 # from transformers import AutoModelForSeq2SeqLM
 from scheduler import create_scheduler
 from optim import create_optimizer
-from apex import amp
+# from apex import amp
 from rouge_score import rouge_scorer
 scorer = rouge_scorer.RougeScorer(['rouge1', 'rouge2', 'rougeLsum'], use_stemmer=True)
-from apex.parallel import DistributedDataParallel as apexDDP
+# from apex.parallel import DistributedDataParallel as apexDDP
 from label_smoothing_loss import label_smoothing_loss
 from module.prefix_model import PrefixSummarizationModule
 
+@torch.no_grad()
+def evaluate(model, data_loader, tokenizer, device, config, args, mle_fn):
+    # test
+    model.eval()
+            
+    metric_logger = utils.MetricLogger(delimiter="  ")
+
+    header = 'Evaluation:'
+    print_freq = 50
+    sample = 0
+    # loss_all = 0
+    for text,summary in metric_logger.log_every(data_loader, print_freq, header):
+        
+        text_inputs = tokenizer(text,max_length=1024,padding=True,truncation=True,return_tensors="pt").to(device) 
+        summary_inputs = tokenizer(summary,max_length=128,pad_to_max_length=False,truncation=True,padding=True,return_tensors="pt").to(device) 
+        output = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,decoder_attention_mask = summary_inputs.attention_mask,labels = summary_inputs.input_ids,use_cache=False,
+                    use_prefix=True)  
+        # loss = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,labels = summary_inputs.input_ids).loss    
+        loss = mle_fn(output.logits.transpose(1,2),summary_inputs.input_ids)
+        sample+=1
+        metric_logger.meters['loss'].update(loss.cpu().item(), n=len(text))
+                
+    # gather the stats from all processes
+    metric_logger.synchronize_between_processes()
+    print("Averaged stats loss:", metric_logger.global_avg())   
+    return {k: "{:.4f}".format(meter.global_avg) for k, meter in metric_logger.meters.items()}
 def train(model, data_loader, optimizer, tokenizer, max_epoch, device, mle_fn, config, args, val_loader):
     # model, train_loader, optimizer, tokenizer, epoch, device, mle_fn, config,args
     # train
+    #val_stats = evaluate(model, val_loader, tokenizer, device, config, args, mle_fn)
+    # save_obj = {
+    #     'model': model.model.state_dict(),
+    #     "seq2seq_model": model.seq2seq_model.state_dict(),
+    #     'optimizer': optimizer.state_dict(),
+    #     # 'lr_scheduler': lr_scheduler.state_dict(),
+    #     'config': config,
+    # }
+    # torch.save(save_obj, os.path.join(args.output_dir, 'checkpoint_{}.pth'.format('test'))) 
     model.train() 
     best = 1000 
     all_step_cnt = 1
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=50, fmt='{value:.6f}'))
     metric_logger.add_meter('loss', utils.SmoothedValue(window_size=50, fmt='{value:.4f}'))
+    # val_stats = evaluate(model, val_loader, tokenizer, device, config, args)
     for epoch in range(max_epoch):
         header = 'Train Epoch: [{}]'.format(epoch)
         print_freq = 50   
@@ -58,10 +94,11 @@ def train(model, data_loader, optimizer, tokenizer, max_epoch, device, mle_fn, c
         # warmup_iterations = warmup_steps*step_size  
         for i,(text,summary) in enumerate(metric_logger.log_every(data_loader, print_freq, header)):
             step_cnt += 1         
-            text_inputs = tokenizer.batch_encode_plus(text,max_length=1024,pad_to_max_length=False,truncation=True,return_tensors="pt").to(device) 
-            summary_inputs = tokenizer.batch_encode_plus(summary,max_length=128,pad_to_max_length=False,truncation=True,padding=True,return_tensors="pt").to(device) 
+            text_inputs = tokenizer(text,max_length=1024,padding=True,truncation=True,return_tensors="pt").to(device) 
+            summary_inputs = tokenizer(summary,max_length=128,pad_to_max_length=False,truncation=True,padding=True,return_tensors="pt").to(device) 
             output = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,decoder_attention_mask = summary_inputs.attention_mask,labels = summary_inputs.input_ids,use_cache=False,
-                       use_prefix=True)  
+                       use_prefix=True)
+            logits = output  
             # loss = model(input_ids=text_inputs.input_ids,attention_mask = text_inputs.attention_mask,labels = summary_inputs.input_ids).loss    
             loss = mle_fn(output.logits.transpose(1,2),summary_inputs.input_ids)
         ##############################################################
@@ -80,7 +117,7 @@ def train(model, data_loader, optimizer, tokenizer, max_epoch, device, mle_fn, c
                 optimizer.step()
                 optimizer.zero_grad()
             if all_step_cnt % 1000 == 0:
-                val_stats = evaluate(model, val_loader, tokenizer, device, config, args)
+                val_stats = evaluate(model, val_loader, tokenizer, device, config, args,mle_fn)
                 if utils.is_main_process():
                     print("best is {}".format(best))    
                     log_stats = {**{f'val_{k}': v for k, v in val_stats.items()},
@@ -158,9 +195,9 @@ def main(args, config):
     optimizer = optim.Adam(model.parameters())
     if args.distributed:
         if args.fp16:
-            model, optimizer = amp.initialize(model, optimizer,
-                                  opt_level='O1')  
-            model = apexDDP(model)
+            # model, optimizer = amp.initialize(model, optimizer,
+            #                       opt_level='O1')  
+            # model = apexDDP(model)
             model_without_ddp = model.module  
         else:
             model = torch.nn.parallel.DistributedDataParallel(model, device_ids=[args.gpu])
@@ -188,9 +225,9 @@ if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('--config', default='./configs/prefix.yaml')
     parser.add_argument('--output_dir', default='output/prefix')  
-    parser.add_argument('--checkpoint', default='/data1/ach/project/T5summarization/model/bart-large')   
+    parser.add_argument('--checkpoint', default='/data1/ach/project/T5summarization/model/bart-large-xsum')   
     parser.add_argument('--evaluate', action='store_true')    
-    parser.add_argument('--device', default='cuda:1')
+    parser.add_argument('--device', default='cuda:2')
     # parser.add_argument('--prefix', default='cuda:6')
     parser.add_argument('--seed', default=42, type=int)
     parser.add_argument('--world_size', default=1, type=int, help='number of distributed processes')    
